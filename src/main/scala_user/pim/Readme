@@ -7,3 +7,77 @@ L-ZERO RTL Track Week 5 - Task 1
 4×4 매트릭스 곱셈 가속기 (C = A × B)를 위한 Data Orchestrator와 Unified Buffer를 Chisel로 구현했습니다.
 
 ## 아키텍처
+
+┌─────────────────────────────────────────────┐
+│              Unified Buffer                 │
+│  A area (0~255) │ B area (256~511) │ C area │
+└────┬────────────┴─────┬─────────────┴───▲───┘
+│ rdata            │ wdata           │
+┌────▼──────────────────▼─────────────────┴───┐
+│            Orchestrator (FSM)               │
+│  - 어드레스 생성     - MAC array 제어        │
+│  - 9-state FSM      - B preload + compute   │
+└────┬─────────────┬───────────────────────┬──┘
+│ in_a        │ in_b[4]               │ clear/en
+┌────▼─────────────▼───────────────────────▼──┐
+│         MAC Array (4-lane vector)           │
+│   Output Stationary dataflow                │
+│   accumulator: 32-bit                       │
+└─────────────────────────────────────────────┘
+
+
+
+## 구성 모듈
+
+| 파일 | 역할 |
+|------|------|
+| `PIMTypes.scala` | 공통 파라미터 정의 (MATRIX_SIZE, DATA_WIDTH, 메모리 맵) |
+| `UnifiedBuffer.scala` | SyncReadMem 기반 통합 메모리 (1024 × 8-bit) |
+| `MacArray.scala` | 4-lane 1D 벡터 MAC array (Output Stationary) |
+| `Orchestrator.scala` | 9-state FSM 데이터 컨트롤러 |
+| `PIMTop.scala` | 위 세 모듈을 통합한 top module |
+| `PIMTopMain.scala` | Verilog 생성 entry point |
+
+## 메모리 맵
+
+| 영역 | 주소 범위 | 용도 |
+|------|-----------|------|
+| A area | 0 ~ 255 | Input matrix A (row-major) |
+| B area | 256 ~ 511 | Weight matrix B (row-major) |
+| C area | 512 ~ 767 | Output matrix C (row-major) |
+| Reserved | 768 ~ 1023 | 향후 확장용 |
+
+## Unified Buffer 리소스 선택: BRAM
+
+### 선택 이유
+- **소규모 행렬 (4×4)**: 16 entries × 3 영역 = 48 entries (~ 3KB)
+- **BRAM 1 블록 (36Kb)** 으로 충분히 커버 가능
+- **다중 포트 확장성**: 향후 Orchestrator를 확장해서 동시 read가 필요할 때 BRAM이 유리
+- **SyncReadMem 사용**: 합성 툴이 자동으로 BRAM에 매핑
+
+### URAM이 더 적합한 상황 (향후 확장 시)
+- 매트릭스 크기가 64×64 이상으로 커질 때 (URAM 288Kb 단위가 효율적)
+- Weight를 한 번 로딩하고 오래 재사용하는 경우 (대용량 weight 저장에 유리)
+- BRAM 자원이 다른 모듈에 의해 소진된 경우
+
+## 데이터 흐름 (Output Stationary)
+
+1. **Phase 1 - B Preload (16 cycle)**: B 전체를 internal 레지스터 16개에 미리 로드
+2. **Phase 2 - Compute**: A 원소를 하나씩 읽으면서 MAC array에 broadcast, B의 k-row를 4-lane에 공급. K번 누적해서 C의 한 row 완성
+3. **Phase 3 - Store**: 누적된 결과를 C area에 4 cycle에 걸쳐 write
+
+총 사이클 수: 약 80 cycle (4×4 기준)
+
+## 빌드 방법
+
+```bash
+docker compose up -d
+docker exec -it lzero_01_rtl-lzero-rtl-1 sbt "runMain pim.PIMTopMain"
+```
+
+결과: `generated/PIMTop.sv`
+
+## 검증 상태
+
+- [x] Chisel → SystemVerilog elaborate 통과
+- [ ] 시뮬레이션 기반 동작 검증 (향후 작업)
