@@ -1,0 +1,9 @@
+# PIM Core: Data Orchestrator & Unified Buffer
+
+L-ZERO RTL Track Week 5 - Task 1
+
+## 설계 개요
+
+4×4 매트릭스 곱셈 가속기 (C = A × B)를 위한 Data Orchestrator와 Unified Buffer를 Chisel로 구현했습니다.
+
+## 아키텍처
